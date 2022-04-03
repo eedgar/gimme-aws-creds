@@ -17,6 +17,8 @@ import json
 import os
 import re
 import sys
+import concurrent.futures
+
 
 # extras
 import boto3
@@ -709,7 +711,7 @@ class GimmeAWSCreds(object):
             except ClientError as ex:
                 if 'requested DurationSeconds exceeds the MaxSessionDuration' in ex.response['Error']['Message']:
                     self.ui.warning(
-                        "The requested session duration was too long for this role.  Falling back to 1 hour.")
+                        "The requested session duration was too long for the role {}.  Falling back to 1 hour.".format(role.role))
                     aws_creds = self._get_sts_creds(
                         self.aws_partition,
                         self.saml_data['SAMLResponse'],
@@ -774,12 +776,24 @@ class GimmeAWSCreds(object):
 
     def iter_selected_aws_credentials(self):
         results = []
-        for role in self.aws_selected_roles:
+        aws_results = []
+        def generate_credentials_prepare_data(role):
             data = self.prepare_data(role, generate_credentials=True)
-            if not data:
+            return data
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            aws_results = executor.map(generate_credentials_prepare_data, self.aws_selected_roles)
+        for r in aws_results:
+            if not r:
                 continue
-            results.append(data)
-            yield data
+            results.append(r)
+            yield r
+        #for role in self.aws_selected_roles:
+        #    data = self.prepare_data(role, generate_credentials=True)
+        #    if not data:
+        #        continue
+        #    results.append(data)
+        #    yield data
 
         self._cache['selected_aws_credentials'] = results
 
